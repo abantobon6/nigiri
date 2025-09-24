@@ -27,6 +27,8 @@
 
 namespace nigiri {
 
+struct day_list;
+
 struct timetable {
   struct locations {
     timezone_idx_t register_timezone(timezone tz) {
@@ -47,7 +49,8 @@ struct timetable {
                         parents_[idx],
                         location_timezones_[idx],
                         transfer_time_[idx],
-                        it_range{equivalences_[idx]}};
+                        it_range{equivalences_[idx]},
+                        it_range{alt_names_[idx]}};
       l.l_ = idx;
       return l;
     }
@@ -62,11 +65,26 @@ struct timetable {
                                             : std::optional{get(it->second)};
     }
 
+    location_idx_t get_root_idx(location_idx_t const idx) const {
+      auto l = idx;
+      auto i = 0;
+      for (auto p = parents_[l]; p != location_idx_t::invalid();
+           p = parents_[l]) {
+        if (p == idx || i > 20) {
+          return parents_[idx];
+        }
+        l = p;
+        ++i;
+      }
+      return l;
+    }
+
     hash_map<location_id, location_idx_t> location_id_to_idx_;
     vecvec<location_idx_t, char> names_;
     vecvec<location_idx_t, char> platform_codes_;
     vecvec<location_idx_t, char> descriptions_;
     vecvec<location_idx_t, char> ids_;
+    vecvec<location_idx_t, alt_name_idx_t> alt_names_;
     vector_map<location_idx_t, geo::latlng> coordinates_;
     vector_map<location_idx_t, source_idx_t> src_;
     vector_map<location_idx_t, u8_minutes> transfer_time_;
@@ -81,6 +99,8 @@ struct timetable {
     array<vecvec<location_idx_t, footpath>, kNProfiles> footpaths_in_;
     vector_map<timezone_idx_t, timezone> timezones_;
     vector_map<location_idx_t, std::uint32_t> location_importance_;
+    vecvec<alt_name_idx_t, char> alt_name_strings_;
+    vector_map<alt_name_idx_t, language_idx_t> alt_name_langs_;
     std::uint32_t max_importance_{0U};
     rtree<location_idx_t> rtree_;
   } locations_;
@@ -88,7 +108,7 @@ struct timetable {
   struct transport {
     bitfield_idx_t bitfield_idx_;
     route_idx_t route_idx_;
-    duration_t first_dep_offset_;
+    delta first_dep_offset_;
     basic_string<merged_trips_idx_t> const& external_trip_ids_;
     basic_string<attribute_combination_idx_t> const& section_attributes_;
     basic_string<provider_idx_t> const& section_providers_;
@@ -293,9 +313,7 @@ struct timetable {
     return route_location_seq_.size();
   }
 
-  cista::base_t<source_idx_t> n_sources() const {
-    return source_file_names_.size();
-  }
+  cista::base_t<source_idx_t> n_sources() const { return n_sources_; }
 
   cista::base_t<provider_idx_t> n_agencies() const { return providers_.size(); }
 
@@ -309,7 +327,9 @@ struct timetable {
             date_range_.to_ + date::days{1}};
   }
 
-  constexpr interval<unixtime_t> internal_interval() const {
+  day_list days(bitfield const&) const;
+
+  interval<unixtime_t> internal_interval() const {
     return {
         std::chrono::time_point_cast<i32_minutes>(date_range_.from_ -
                                                   kTimetableOffset),
@@ -408,7 +428,7 @@ struct timetable {
 
   // Trip -> debug info
   mutable_fws_multimap<trip_idx_t, trip_debug> trip_debug_;
-  vecvec<source_file_idx_t, char> source_file_names_;
+  vecvec<source_file_idx_t, char, std::uint32_t> source_file_names_;
 
   // Trip index -> trip name
   vecvec<trip_idx_t, char> trip_short_names_;
@@ -459,7 +479,7 @@ struct timetable {
 
   // Offset between the stored time and the time given in the GTFS timetable.
   // Required to match GTFS-RT with GTFS-static trips.
-  vector_map<transport_idx_t, duration_t> transport_first_dep_offset_;
+  vector_map<transport_idx_t, delta> transport_first_dep_offset_;
 
   // Services in GTFS can start with a first departure time > 24:00:00
   // The loader transforms this into a time <24:00:00 and shifts the bits in the
@@ -546,6 +566,10 @@ struct timetable {
 
   // Strings
   string_store<string_idx_t> strings_;
+
+  vecvec<language_idx_t, char> languages_;
+
+  cista::base_t<source_idx_t> n_sources_{};
 };
 
 }  // namespace nigiri

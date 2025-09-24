@@ -93,6 +93,7 @@ void load_timetable(loader_config const& config,
                     assistance_times* assistance,
                     shapes_storage* shapes_data) {
   auto local_bitfield_indices = hash_map<bitfield, bitfield_idx_t>{};
+  tt.n_sources_ = std::max(tt.n_sources_, to_idx(src + 1U));
   load_timetable(config, src, d, tt, local_bitfield_indices, assistance,
                  shapes_data);
 }
@@ -456,12 +457,13 @@ void load_timetable(loader_config const& config,
             }
           }
 
+          assert(s.first_dep_offset_.count() >= -1);
           tt.add_transport(timetable::transport{
               .bitfield_idx_ = utl::get_or_create(
                   bitfield_indices, s.utc_traffic_days_,
                   [&]() { return tt.register_bitfield(s.utc_traffic_days_); }),
               .route_idx_ = route_idx,
-              .first_dep_offset_ = s.first_dep_offset_,
+              .first_dep_offset_ = {s.first_dep_offset_, s.tz_offset_},
               .external_trip_ids_ = external_trip_ids,
               .section_attributes_ = attributes,
               .section_providers_ = {first.route_->agency_},

@@ -78,15 +78,17 @@ std::pair<date::sys_days, duration_t> run_stop::get_trip_start(
 
     // service date + start time
     auto const [static_transport, utc_start_day] = fr_->t_;
-    auto const o = tt().transport_first_dep_offset_[static_transport];
+    auto const [first_dep_offset, tz_offset] =
+        tt().transport_first_dep_offset_[static_transport].to_offset();
     auto const utc_dep =
         tt().event_mam(static_transport, first_trip_stop.stop_idx_,
                        event_type::kDep)
             .as_duration();
-    auto const gtfs_static_dep = utc_dep + o;
-    auto const [day_offset, _] = split_rounded(gtfs_static_dep - utc_dep);
-    auto const day = (tt().internal_interval_days().from_ +
-                      std::chrono::days{to_idx(utc_start_day)} - day_offset);
+    auto const gtfs_static_dep = utc_dep + first_dep_offset + tz_offset;
+
+    auto const day =
+        (tt().internal_interval_days().from_ +
+         std::chrono::days{to_idx(utc_start_day)} - first_dep_offset);
 
     return {day, gtfs_static_dep};
   }
@@ -115,6 +117,30 @@ location_idx_t run_stop::get_location_idx() const {
 location_idx_t run_stop::get_scheduled_location_idx() const {
   assert(fr_->size() > stop_idx_);
   return get_scheduled_stop().location_idx();
+}
+
+run_stop run_stop::get_last_trip_stop(event_type const ev_type) const {
+  auto const end = fr_->size();
+  if (!fr_->is_scheduled()) {
+    return run_stop{fr_, static_cast<stop_idx_t>(end - 1)};
+  }
+
+  auto const trip = get_trip_idx(ev_type);
+  auto copy = *this;
+  if (copy.stop_idx_ == end - 1) {
+    return copy;
+  }
+
+  // Can't be (end-1), so ++stop_idx is fine.
+  ++copy.stop_idx_;
+
+  // Can't be 0 after ++stop_idx, so get_trip_idx(kArr) is fine.
+  while (copy.stop_idx_ < end - 1 &&
+         copy.get_trip_idx(event_type::kArr) == trip) {
+    ++copy.stop_idx_;
+  }
+
+  return copy;
 }
 
 unixtime_t run_stop::scheduled_time(event_type const ev_type) const {
@@ -709,7 +735,8 @@ trip_idx_t frun::trip_idx() const {
 void run_stop::print(std::ostream& out,
                      bool const first,
                      bool const last) const {
-  auto const& tz = tt().locations_.timezones_.at(get_tz(event_type::kDep));
+  auto const& tz = tt().locations_.timezones_.at(
+      get_tz(last ? event_type::kArr : event_type::kDep));
 
   // Print stop index, location name.
   fmt::print(out, "  {:2}: {:7} {:.<48}", stop_idx_, get_location().id_,
@@ -766,7 +793,9 @@ void run_stop::print(std::ostream& out,
         if (j++ != 0) {
           out << ", ";
         }
-        out << "{name=" << display_name() << ", day=";
+        out << "{name="
+            << display_name(last ? event_type::kArr : event_type::kDep)
+            << ", day=";
         date::to_stream(
             out, "%F",
             tt.internal_interval_days().from_ + to_idx(fr_->t_.day_) * 1_days);

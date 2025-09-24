@@ -63,6 +63,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         -Wno-documentation-unknown-command
         -Wno-duplicate-enum
         -Wno-switch-default
+        -Wno-ctad-maybe-unsupported
         -Werror)
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
   set(nigiri-compile-options -Wall -Wextra -Werror)
@@ -102,9 +103,11 @@ target_link_libraries(
   boost-json
   sol2
   libluajit
+  proj
 )
 target_compile_features(nigiri PUBLIC cxx_std_23)
 target_compile_options(nigiri PRIVATE ${nigiri-compile-options})
+target_compile_definitions(nigiri PUBLIC PUGIXML_COMPACT=1)
 
 # --- IMPORTER ---
 file(GLOB_RECURSE nigiri-import-files exe/import.cc)
@@ -134,5 +137,6 @@ configure_file(
 file(GLOB_RECURSE nigiri-test-files test/*.cc)
 add_executable(nigiri-test ${nigiri-test-files})
 target_include_directories(nigiri-test PRIVATE include)
-target_link_libraries(nigiri-test nigiri gtest ianatzdb-res nigiri-generated)
+target_link_libraries(nigiri-test nigiri gmock ianatzdb-res nigiri-generated)
+target_compile_features(nigiri-test PUBLIC cxx_std_23)
 target_compile_options(nigiri-test PRIVATE ${nigiri-compile-options})

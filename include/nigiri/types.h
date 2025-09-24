@@ -185,6 +185,8 @@ using location_group_idx_t =
     cista::strong<std::uint32_t, struct _location_group_idx>;
 using booking_rule_idx_t =
     cista::strong<std::uint32_t, struct _booking_rule_idx>;
+using alt_name_idx_t = cista::strong<std::uint32_t, struct _alt_name_idx>;
+using language_idx_t = cista::strong<std::uint16_t, struct _language_idx>;
 
 using flex_stop_t = variant<flex_area_idx_t, location_group_idx_t>;
 
@@ -459,6 +461,15 @@ struct delta {
   delta(std::uint16_t const day, std::uint16_t const mam)
       : days_{day}, mam_{mam} {}
 
+  delta(date::days const day_offset, duration_t const minutes_offset)
+      : days_{static_cast<std::uint16_t>(day_offset.count() + 1)},
+        mam_{static_cast<std::uint16_t>(minutes_offset.count() + 720)} {
+    assert(day_offset.count() >= -1);
+    assert(day_offset.count() < 30);
+    assert(minutes_offset.count() >= -720);
+    assert(minutes_offset.count() < 1320);
+  }
+
   std::uint16_t value() const {
     return *reinterpret_cast<std::uint16_t const*>(this);
   }
@@ -481,6 +492,10 @@ struct delta {
   }
 
   duration_t as_duration() const { return days() * 1_days + mam() * 1_minutes; }
+
+  std::pair<date::days, duration_t> to_offset() const {
+    return {date::days{days() - 1}, duration_t{mam() - 720}};
+  }
 
   std::int16_t count() const { return days_ * 1440U + mam_; }
 

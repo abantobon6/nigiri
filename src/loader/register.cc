@@ -71,8 +71,7 @@ location::location(timetable const& tt, location_idx_t const l)
       type_{tt.locations_.types_[l]},
       parent_{tt.locations_.parents_[l]},
       timezone_idx_{tt.locations_.location_timezones_[l]},
-      transfer_time_{tt.locations_.transfer_time_[l]},
-      equivalences_{tt.locations_.equivalences_[l]} {}
+      transfer_time_{tt.locations_.transfer_time_[l]} {}
 
 location::location(std::string_view id,
                    std::string_view name,
@@ -84,7 +83,6 @@ location::location(std::string_view id,
                    location_idx_t parent,
                    timezone_idx_t timezone,
                    duration_t transfer_time,
-                   std::span<location_idx_t const> equivalences,
                    timetable& tt,
                    gtfs::tz_map& tz_map)
     : src_{src},
@@ -97,7 +95,6 @@ location::location(std::string_view id,
       parent_{parent},
       timezone_idx_{timezone},
       transfer_time_{transfer_time},
-      equivalences_{equivalences},
       tt_{&tt},
       tz_map_{&tz_map} {}
 
@@ -410,6 +407,7 @@ location_idx_t register_location(timetable& tt, location const& l) {
     loc.descriptions_.emplace_back(l.description_);
     loc.coordinates_.emplace_back(l.pos_);
     loc.ids_.emplace_back(l.id_);
+    loc.alt_names_.add_back_sized(0U);
     loc.src_.emplace_back(l.src_);
     loc.types_.emplace_back(l.type_);
     loc.location_timezones_.emplace_back(l.timezone_idx_);
@@ -429,6 +427,7 @@ location_idx_t register_location(timetable& tt, location const& l) {
   assert(loc.descriptions_.size() == next_idx + 1);
   assert(loc.coordinates_.size() == next_idx + 1);
   assert(loc.ids_.size() == next_idx + 1);
+  assert(loc.alt_names_.size() == next_idx + 1);
   assert(loc.src_.size() == next_idx + 1);
   assert(loc.types_.size() == next_idx + 1);
   assert(loc.location_timezones_.size() == next_idx + 1);
