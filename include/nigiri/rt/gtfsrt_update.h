@@ -9,6 +9,9 @@
 
 #include "nigiri/types.h"
 
+#include "nigiri/hist_trip_times_storage.h"
+#include "nigiri/shapes_storage.h"
+
 namespace nigiri {
 struct rt_timetable;
 struct timetable;
@@ -54,7 +57,8 @@ statistics gtfsrt_update_msg(timetable const&,
                              source_idx_t const,
                              std::string_view tag,
                              transit_realtime::FeedMessage const&,
-                             bool use_vehicle_position = false);
+                             bool use_vehicle_position = false,
+                             hist_trip_times_storage* hist_trip_time_store = nullptr);
 
 statistics gtfsrt_update_buf(timetable const& tt,
                              rt_timetable& rtt,
@@ -62,13 +66,15 @@ statistics gtfsrt_update_buf(timetable const& tt,
                              std::string_view tag,
                              std::string_view protobuf,
                              transit_realtime::FeedMessage& msg,
-                             bool use_vehicle_position = false);
+                             bool use_vehicle_position = false,
+                             hist_trip_times_storage* hist_trip_time_store = nullptr);
 
 statistics gtfsrt_update_buf(timetable const&,
                              rt_timetable&,
                              source_idx_t const,
                              std::string_view tag,
                              std::string_view protobuf,
-                             bool use_vehicle_position = false);
+                             bool use_vehicle_position = false,
+                             hist_trip_times_storage* hist_trip_time_store = nullptr);
 
 }  // namespace nigiri::rt
