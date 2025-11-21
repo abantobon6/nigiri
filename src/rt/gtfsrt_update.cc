@@ -7,6 +7,8 @@
 #include "utl/pairwise.h"
 #include "utl/verify.h"
 
+#include "geo/latlng.h"
+
 #include "nigiri/loader/gtfs/stop_seq_number_encoding.h"
 #include "nigiri/loader/gtfs/trip_time_data.h"
 
@@ -20,6 +22,7 @@
 #include "nigiri/rt/gtfsrt_alert.h"
 #include "nigiri/rt/gtfsrt_resolve_run.h"
 #include "nigiri/rt/run.h"
+#include "nigiri/types.h"
 
 namespace gtfsrt = transit_realtime;
 namespace protob = google::protobuf;
@@ -197,10 +200,19 @@ bool add_rt_trip(source_idx_t const src,
 
   auto stops = std::vector<stop::value_type>{};
   if (added_or_replaced) {
+    auto last_pos = geo::latlng{};
+    auto last_time = unixtime_t{};
     for (auto const& stu : stus) {
-      utl::verify((!stu.has_departure() || stu.departure().has_time()) &&
-                      (!stu.has_arrival() || stu.arrival().has_time()),
-                  "absolute times are required for unscheduled trips");
+      auto new_time = unixtime_t{};
+      if (stu.has_departure() && stu.departure().has_time()) {
+        new_time = unixtime_t{std::chrono::duration_cast<unixtime_t::duration>(
+            std::chrono::seconds{stu.departure().time()})};
+      } else if (stu.has_arrival() && stu.arrival().has_time()) {
+        new_time = unixtime_t{std::chrono::duration_cast<unixtime_t::duration>(
+            std::chrono::seconds{stu.arrival().time()})};
+      } else {
+        throw utl::fail("absolute times are required for unscheduled trips");
+      }
       utl::verify(stu.has_stop_id(),
                   "stop_id is required for unscheduled trips");
       auto const it =
@@ -212,6 +224,22 @@ bool add_rt_trip(source_idx_t const src,
             src, tripUpdate.trip().trip_id(), stu.stop_id());
         return false;
       }
+      if (last_time != unixtime_t{}) {
+        auto const time_between_stops = (new_time - last_time).count();
+        auto const dist_between_stops =
+            geo::distance(tt.locations_.coordinates_.at(it->second), last_pos);
+        if (dist_between_stops / std::max(time_between_stops, 1) / 60 >
+            kMaxTransitSpeed) {
+          log(log_lvl::error, "rt.gtfs.invalid",
+              "NEW/ADDED trip is travelling too fast "
+              "(src={}, trip_id={}, stop_id={}, dist={}, delta={}), skipping",
+              src, tripUpdate.trip().trip_id(), stu.stop_id(),
+              dist_between_stops, time_between_stops);
+          return false;
+        }
+      }
+      last_pos = tt.locations_.coordinates_.at(it->second);
+      last_time = new_time;
       auto in_allowed = true, out_allowed = true;
       if (stu.has_stop_time_properties()) {
         if (stu.stop_time_properties().has_pickup_type()) {
@@ -257,6 +285,14 @@ bool add_rt_trip(source_idx_t const src,
     }
     return {};
   };
+  auto const direction_id = [&]() -> direction_id_t {
+    if ((is_added(sr) ||
+         sr == gtfsrt::TripDescriptor_ScheduleRelationship_DUPLICATED) &&
+        tripUpdate.trip().has_direction_id()) {
+      return direction_id_t{tripUpdate.trip().direction_id() != 0U};
+    }
+    return direction_id_t{};
+  };
   auto const trip_short_name =
       tripUpdate.has_trip_properties() &&
               tripUpdate.trip_properties().has_trip_short_name()
@@ -266,7 +302,7 @@ bool add_rt_trip(source_idx_t const src,
   // REPLACEMENT stops+times
   // DUPL new_trip_id
   r.rt_ = rtt.add_rt_transport(src, tt, r.t_, stops, times, new_trip_id(),
-                               route_id(), trip_short_name);
+                               route_id(), direction_id(), trip_short_name);
   if (sr == transit_realtime::TripDescriptor_ScheduleRelationship_REPLACEMENT) {
     r.t_ = transport::invalid();
   }
@@ -424,6 +460,24 @@ bool update_run(source_idx_t const src,
     if (matches) {
       ++upd_it;
     }
+  }
+
+  auto pred_time = std::numeric_limits<delta_t>::min();
+  auto i = 0U;
+  for (auto& curr : rtt.rt_transport_stop_times_[r.rt_]) {
+    if (curr < pred_time) {
+      curr = pred_time;
+
+      auto const stop = static_cast<stop_idx_t>((i + 1U) / 2U);
+      auto const ev_type = i % 2U == 0U ? event_type::kDep : event_type::kArr;
+      auto const curr_unix_time = rtt.base_day_ + duration_t{curr};
+      auto const static_time = r.is_scheduled()
+                                   ? tt.event_time(r.t_, stop, ev_type)
+                                   : curr_unix_time;
+      rtt.dispatch_delay(r, stop, ev_type, curr_unix_time - static_time);
+    }
+    pred_time = curr;
+    ++i;
   }
 
   auto const n_not_cancelled_stops = utl::count_if(
@@ -702,12 +756,12 @@ statistics gtfsrt_update_msg(timetable const& tt,
       resolve_static(today, tt, src, td, [&](run r, trip_idx_t const trip) {
         is_resolved_static = true;
 
-        resolve_rt(rtt, r, trip_id);
+        resolve_rt(rtt, r, trip_id, src);
 
         if (sr == gtfsrt::TripDescriptor_ScheduleRelationship_CANCELED) {
           rtt.cancel_run(r);
           ++stats.total_entities_success_;
-        } else {
+        } else if (!added) {
           if (update_run(src, tt, rtt, trip, r, entity.trip_update())) {
             ++stats.total_entities_success_;
           }
@@ -720,7 +774,7 @@ statistics gtfsrt_update_msg(timetable const& tt,
         utl::verify(!is_resolved_static,
                     "NEW/ADDED trip is required to have a new trip_id");
         auto r = rt::run{};
-        resolve_rt(rtt, r, trip_id.empty() ? td.trip_id() : trip_id);
+        resolve_rt(rtt, r, trip_id.empty() ? td.trip_id() : trip_id, src);
         if (update_run(src, tt, rtt, trip_idx_t::invalid(), r,
                        entity.trip_update())) {
           ++stats.total_entities_success_;
@@ -729,7 +783,7 @@ statistics gtfsrt_update_msg(timetable const& tt,
       }
 
       if (!is_resolved_static) {
-        log(log_lvl::error, "rt.gtfs.resolve", "could not resolve (tag={}) {}",
+        log(log_lvl::debug, "rt.gtfs.resolve", "could not resolve (tag={}) {}",
             tag, remove_nl(td.DebugString()));
         span->AddEvent(
             "unresolved trip",
