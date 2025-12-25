@@ -1,4 +1,5 @@
 #pragma once
+#include "nigiri/delay_prediction_storage.h"
 
 #ifdef NO_DATA
 #undef NO_DATA
@@ -58,6 +59,7 @@ statistics gtfsrt_update_msg(timetable const&,
                              std::string_view tag,
                              transit_realtime::FeedMessage const&,
                              bool use_vehicle_position = false,
+                             delay_prediction_storage* delay_prediction_store = nullptr,
                              hist_trip_times_storage* hist_trip_time_store = nullptr);
 
 statistics gtfsrt_update_buf(timetable const& tt,
@@ -67,6 +69,7 @@ statistics gtfsrt_update_buf(timetable const& tt,
                              std::string_view protobuf,
                              transit_realtime::FeedMessage& msg,
                              bool use_vehicle_position = false,
+                             delay_prediction_storage* delay_prediction_store = nullptr,
                              hist_trip_times_storage* hist_trip_time_store = nullptr);
 
 statistics gtfsrt_update_buf(timetable const&,
@@ -75,6 +78,7 @@ statistics gtfsrt_update_buf(timetable const&,
                              std::string_view tag,
                              std::string_view protobuf,
                              bool use_vehicle_position = false,
+                             delay_prediction_storage* delay_prediction_store = nullptr,
                              hist_trip_times_storage* hist_trip_time_store = nullptr);
 
 }  // namespace nigiri::rt

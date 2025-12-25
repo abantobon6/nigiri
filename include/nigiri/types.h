@@ -165,7 +165,6 @@ using location_idx_t = cista::strong<std::uint32_t, struct _location_idx>;
 using route_idx_t = cista::strong<std::uint32_t, struct _route_idx>;
 using section_idx_t = cista::strong<std::uint32_t, struct _section_idx>;
 using section_db_idx_t = cista::strong<std::uint32_t, struct _section_db_idx>;
-using segment_idx_t = cista::strong<std::uint32_t, struct _part_idx>;
 using shape_idx_t = cista::strong<std::uint32_t, struct _shape_idx>;
 using shape_offset_t = cista::strong<std::uint32_t, struct _shape_offset>;
 using shape_offset_idx_t =

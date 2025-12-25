@@ -20,7 +20,7 @@ struct trip_delay_pred {
 };
 
 struct delay_prediction_storage {
-  mm_vec_map<key, trip_delay_pred> key_trip_delay_;
+  vector_map<key, trip_delay_pred> key_trip_delay_;
 };
 
 }  // namespace nigiri

@@ -3,11 +3,13 @@
 #include "boost/date_time/gregorian/gregorian_types.hpp"
 
 #include "nigiri/types.h"
+#include "timetable.h"
 
 namespace nigiri {
 
 using coord_seq_idx_t = cista::strong<std::uint32_t, struct _coord_seq_idx>;
 using trip_time_data_idx_t = cista::strong<std::uint64_t, struct _trip_time_data_idx>;
+using segment_idx_t = cista::strong<std::uint32_t, struct _part_idx>;
 
 struct key {
   trip_idx_t trip_idx;
@@ -26,16 +28,25 @@ struct trip_time_data {
 };
 
 struct hist_trip_times_storage {
-  mm_vec_map<key, coord_seq_idx_t> cs_key_coord_seq_;
-  mm_paged_vecvec<coord_seq_idx_t, geo::latlng> coord_seq_idx_coord_seq_;
+  hash_map<key, coord_seq_idx_t> cs_key_coord_seq_;
+  paged_vecvec<coord_seq_idx_t, location_idx_t> coord_seq_idx_coord_seq_;
 
   mm_paged_vecvec<coord_seq_idx_t, trip_time_data_idx_t> coord_seq_idx_ttd_;
-  vector_map<trip_time_data_idx_t, trip_time_data> test;
+  vector_map<trip_time_data_idx_t, trip_time_data> ttd_idx_trip_time_data_;
 
   // check if key already exists
   // if not: check if similar enough coord_seq exists (find_duplicates())
   // if not: create new index and add entries data structures
-  coord_seq_idx_t match_trip_to_coord_seq(key, interval<location_idx_t>);
+  coord_seq_idx_t match_trip_to_coord_seq(timetable const&, key, vector<location_idx_t>);
+
+  std::pair<segment_idx_t, double> get_segment_progress(timetable const&, geo::latlng, coord_seq_idx_t);
+
+  void print();
+
+  void print(std::ostream& out) const;
+
+  friend std::ostream& operator<<(std::ostream& out, hist_trip_times_storage const& tts);
+
 };
 
 }  // namespace nigiri

@@ -10,8 +10,8 @@
 #include "geo/latlng.h"
 
 #include "nigiri/loader/gtfs/stop_seq_number_encoding.h"
-#include "nigiri/loader/gtfs/trip_time_data.h"
 
+#include "nigiri/common/parse_time.h"
 #include "nigiri/delay_prediction_storage.h"
 #include "nigiri/get_otel_tracer.h"
 #include "nigiri/hist_trip_times_storage.h"
@@ -23,6 +23,8 @@
 #include "nigiri/rt/gtfsrt_resolve_run.h"
 #include "nigiri/rt/run.h"
 #include "nigiri/types.h"
+
+#include "utl/concat.h"
 
 namespace gtfsrt = transit_realtime;
 namespace protob = google::protobuf;
@@ -489,7 +491,7 @@ bool update_run(source_idx_t const src,
   return true;
 }
 
-void handle_vehicle_position(timetable const& tt,
+void calculate_delay_simple(timetable const& tt,
                              rt_timetable& rtt,
                              source_idx_t const src,
                              std::string_view tag,
@@ -608,10 +610,76 @@ void handle_vehicle_position(timetable const& tt,
 void calculate_delay_intelligent(timetable const& tt,
                              rt_timetable& rtt,
                              source_idx_t const src,
+                             std::string_view tag,
                              gtfsrt::FeedEntity const& entity,
-                             hist_trip_times_storage* hist_trip_time_store,
-                             delay_prediction_storage* delay_prediction_store) {
+                             date::sys_days const today,
+                             delay_prediction_storage* delay_prediction_store,
+                             hist_trip_times_storage* hist_trip_time_store) {
 
+  // TODO: create delay calculation
+
+  if (delay_prediction_store != nullptr) {
+    return;
+  }
+
+
+  auto const& vp = entity.vehicle();
+  auto const& td = vp.trip();
+  auto const vehicle_position =
+    geo::latlng{vp.position().latitude(), vp.position().longitude()};
+
+  auto [r, trip_idx] = gtfsrt_resolve_run(today, tt, &rtt, src, td,
+                                            std::string_view{td.trip_id()});
+
+  if (!r.is_scheduled()) {
+    log(log_lvl::info, "rt.gtfs.unsupported",
+        R"(Run is not scheduled. Skipping Message)", tag, entity.id());
+    return;
+  }
+
+  key key{trip_idx, src};
+
+  auto const bla1 = r.t_.t_idx_;
+  auto const bla2 = tt.transport_route_[bla1];
+  auto const bla3 = tt.route_location_seq_[bla2];
+
+
+  auto const location_seq =
+          std::span{bla3};
+
+  auto const location_idx_seq = to_vec(location_seq, [&](auto const& stp) {
+    return stop{stp}.location_idx();
+  });
+
+  auto const coord_seq_idx = hist_trip_time_store->match_trip_to_coord_seq(tt, key, location_idx_seq);
+
+  auto const [current_segment, current_progress] = hist_trip_time_store->get_segment_progress(tt, vehicle_position, coord_seq_idx);
+
+  auto const vp_ts = vp.has_timestamp()
+                           ? unixtime_t{std::chrono::duration_cast<i32_minutes>(
+                                 std::chrono::seconds{vp.timestamp()})}
+                              : std::chrono::time_point_cast<i32_minutes>(std::chrono::system_clock::now());
+
+  const trip_seg_data tsg{current_segment, current_progress, vp_ts};
+
+  auto const ut_start_time = parse_time(td.start_date() + "T" + td.start_time(), "%Y%m%dT%T");
+
+  auto found = false;
+  for (auto ttd_idx : hist_trip_time_store->coord_seq_idx_ttd_[coord_seq_idx]) {
+
+    if (hist_trip_time_store->ttd_idx_trip_time_data_[ttd_idx].start_timestamp
+          == ut_start_time) {
+      hist_trip_time_store->ttd_idx_trip_time_data_[ttd_idx].seg_data_.emplace_back(tsg);
+      found = true;
+      break;
+          }
+  }
+
+  if (!found) {
+    const trip_time_data new_ttd{ut_start_time, {tsg}};
+    hist_trip_time_store->coord_seq_idx_ttd_[coord_seq_idx].push_back(trip_time_data_idx_t{hist_trip_time_store->ttd_idx_trip_time_data_.size()});
+    hist_trip_time_store->ttd_idx_trip_time_data_.emplace_back(new_ttd);
+  }
 }
 
 statistics gtfsrt_update_msg(timetable const& tt,
@@ -620,6 +688,7 @@ statistics gtfsrt_update_msg(timetable const& tt,
                              std::string_view tag,
                              gtfsrt::FeedMessage const& msg,
                              bool const use_vehicle_position,
+                             delay_prediction_storage* delay_prediction_store,
                              hist_trip_times_storage* trip_time_data_store) {
   auto span = get_otel_tracer()->StartSpan("gtfsrt_update_msg", {{"tag", tag}});
   auto scope = opentelemetry::trace::Scope{span};
@@ -660,9 +729,6 @@ statistics gtfsrt_update_msg(timetable const& tt,
     }
 
     if (use_vehicle_position) {
-
-      calculate_delay_intelligent(tt, rtt, src, entity, trip_time_data_store);
-
       ++stats.total_vehicles_;
       if (!entity.has_vehicle()) {
         log(log_lvl::error, "rt.gtfs.unsupported",
@@ -684,8 +750,11 @@ statistics gtfsrt_update_msg(timetable const& tt,
             R"(unsupported: no "trip_id" field in "trip" field (tag={}, id={}), skipping message)",
             tag, entity.id());
         ++stats.vehicle_position_trip_without_trip_id_;
-      } else {
-        handle_vehicle_position(tt, rtt, src, tag, entity, today, message_time,
+      } else if (trip_time_data_store != nullptr) {
+        calculate_delay_intelligent(tt, rtt, src, tag, entity, today, delay_prediction_store, trip_time_data_store);
+      }
+      else {
+        calculate_delay_simple(tt, rtt, src, tag, entity, today, message_time,
                                 span, stats);
       }
       continue;
@@ -825,6 +894,7 @@ statistics gtfsrt_update_buf(timetable const& tt,
                              std::string_view protobuf,
                              gtfsrt::FeedMessage& msg,
                              bool const use_vehicle_position,
+                             delay_prediction_storage* delay_prediction_store,
                              hist_trip_times_storage* hist_trip_time_store) {
   msg.Clear();
 
@@ -838,7 +908,7 @@ statistics gtfsrt_update_buf(timetable const& tt,
     return {.parser_error_ = true};
   }
 
-  return gtfsrt_update_msg(tt, rtt, src, tag, msg, use_vehicle_position, hist_trip_time_store);
+  return gtfsrt_update_msg(tt, rtt, src, tag, msg, use_vehicle_position, delay_prediction_store, hist_trip_time_store);
 }
 
 statistics gtfsrt_update_buf(timetable const& tt,
@@ -847,10 +917,11 @@ statistics gtfsrt_update_buf(timetable const& tt,
                              std::string_view tag,
                              std::string_view protobuf,
                              bool const use_vehicle_position,
+                             delay_prediction_storage* delay_prediction_store,
                              hist_trip_times_storage* hist_trip_time_store) {
   auto msg = gtfsrt::FeedMessage{};
   return gtfsrt_update_buf(tt, rtt, src, tag, protobuf, msg,
-                           use_vehicle_position, hist_trip_time_store);
+                           use_vehicle_position, delay_prediction_store, hist_trip_time_store);
 }
 
 }  // namespace nigiri::rt
