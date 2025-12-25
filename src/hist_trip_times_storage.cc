@@ -55,8 +55,8 @@ std::pair<segment_idx_t, double> hist_trip_times_storage::get_segment_progress(t
           segment_to != coord_seq_idx_coord_seq_[coord_seq_idx].end(); ++segment_to) {
 
     auto const segment_to_test = geo::approx_closest_on_segment(vehicle_position,
-      tt.locations_.get(*segment_from).pos_,
-       tt.locations_.get(*segment_to).pos_,
+      tt.locations_.coordinates_[*segment_from],
+       tt.locations_.coordinates_[*segment_to],
                  app_dist_lng_deg_vp);
 
     if (closest.second < segment_to_test.second) {
@@ -69,11 +69,9 @@ std::pair<segment_idx_t, double> hist_trip_times_storage::get_segment_progress(t
 
   auto const adld = geo::approx_distance_lng_degrees(closest.first);
 
-  auto dist1 = geo::approx_squared_distance(closest.first, tt.locations_.get(*segment_from-1).pos_, adld);
-  auto dist2 = geo::approx_squared_distance(tt.locations_.get(*segment_from).pos_, tt.locations_.get(*(segment_from-1)).pos_, adld);
-
   return {segment_idx_t{segment_from->v_},
-            dist1 / dist2};
+            geo::approx_squared_distance(closest.first, tt.locations_.coordinates_[*segment_from-1], adld)
+            / geo::approx_squared_distance(tt.locations_.coordinates_[*segment_from], tt.locations_.coordinates_[*(segment_from-1)], adld)};
 }
 
 void hist_trip_times_storage::print(std::ostream& out) const {

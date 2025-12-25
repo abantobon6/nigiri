@@ -15,7 +15,6 @@
 #include "nigiri/delay_prediction_storage.h"
 #include "nigiri/get_otel_tracer.h"
 #include "nigiri/hist_trip_times_storage.h"
-#include "nigiri/location.h"
 #include "nigiri/logging.h"
 #include "nigiri/lookup/get_transport.h"
 #include "nigiri/rt/frun.h"
