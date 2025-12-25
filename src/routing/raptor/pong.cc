@@ -16,7 +16,7 @@ auto to_tuple(journey const& j) {
   return std::tuple{j.departure_time(), j.arrival_time(), j.transfers_};
 }
 
-std::optional<std::array<journey::leg, 3U>> get_earliest_alternatve(
+std::optional<std::array<journey::leg, 3U>> get_earliest_alternative(
     timetable const& tt,
     rt_timetable const* rtt,
     query const& q,
@@ -282,15 +282,11 @@ routing_result pong(timetable const& tt,
   // ----
   auto ping_lb = std::vector<std::uint16_t>{};
   dijkstra(tt, q,
-           kFwd ? tt.fwd_search_lb_graph_[q.prf_idx_]
-                : tt.bwd_search_lb_graph_[q.prf_idx_],
+           rtt == nullptr ? (kFwd ? tt.fwd_search_lb_graph_[q.prf_idx_]
+                                  : tt.bwd_search_lb_graph_[q.prf_idx_])
+                          : (kFwd ? rtt->fwd_search_lb_graph_[q.prf_idx_]
+                                  : rtt->bwd_search_lb_graph_[q.prf_idx_]),
            ping_lb);
-  for (auto const [l, lb] : utl::enumerate(ping_lb)) {
-    if (lb != std::numeric_limits<std::decay_t<decltype(lb)>>::max()) {
-      trace_pong("ping lb {}: {}", location{tt, location_idx_t{l}}, lb);
-    }
-  }
-  trace_pong("\n");
 
   auto ping_dist_to_dest = std::vector<std::uint16_t>{};
   auto ping_is_dest = bitvec{};
@@ -322,28 +318,22 @@ routing_result pong(timetable const& tt,
   // PONG
   // ----
   q.flip_dir();
+
   auto pong_lb = std::vector<std::uint16_t>{};
   dijkstra(tt, q,
-           kFwd ? tt.bwd_search_lb_graph_[q.prf_idx_]
-                : tt.fwd_search_lb_graph_[q.prf_idx_],
+           rtt == nullptr ? (kFwd ? tt.bwd_search_lb_graph_[q.prf_idx_]
+                                  : tt.fwd_search_lb_graph_[q.prf_idx_])
+                          : (kFwd ? rtt->bwd_search_lb_graph_[q.prf_idx_]
+                                  : rtt->fwd_search_lb_graph_[q.prf_idx_]),
            pong_lb);
-  for (auto const [l, lb] : utl::enumerate(pong_lb)) {
-    if (lb != std::numeric_limits<std::decay_t<decltype(lb)>>::max()) {
-      trace_pong("pong lb {}: {}", location{tt, location_idx_t{l}}, lb);
-    }
-  }
-  trace_pong("\n");
-  q.flip_dir();
 
   auto pong_dist_to_dest = std::vector<std::uint16_t>{};
   auto pong_is_dest = bitvec{};
-  collect_destinations(tt, q.start_, q.start_match_mode_, pong_is_dest,
+  collect_destinations(tt, q.destination_, q.dest_match_mode_, pong_is_dest,
                        pong_dist_to_dest);
 
   auto pong_is_via = std::array<bitvec, kMaxVias>{};
-  auto reverse_via = q.via_stops_;
-  std::reverse(begin(reverse_via), end(reverse_via));
-  for (auto const [i, via] : utl::enumerate(reverse_via)) {
+  for (auto const [i, via] : utl::enumerate(q.via_stops_)) {
     collect_via_destinations(tt, via.location_, pong_is_via[i]);
   }
 
@@ -364,6 +354,8 @@ routing_result pong(timetable const& tt,
       q.prf_idx_ == 2U,
       q.transfer_time_settings_};
 
+  q.flip_dir();
+
   // ========
   // >> PLAY!
   // --------
@@ -380,11 +372,11 @@ routing_result pong(timetable const& tt,
   auto const is_validated = [&](journey const& j) {
     return is_better(j.dest_time_, start_time);
   };
-  auto const get_result_count = [&]() {
+  auto const get_result_count = [&](bool const include_too_slow) {
     return utl::count_if(*result.journeys_, [&](journey const& j) {
-      return is_validated(j) &&  //
-             j.travel_time() < fastest_direct &&
-             j.travel_time() < q.max_travel_time_;
+      return is_validated(j) &&
+             (include_too_slow || (j.travel_time() < fastest_direct &&
+                                   j.travel_time() < q.max_travel_time_));
     });
   };
   auto const is_timeout_reached = [&]() {
@@ -395,7 +387,8 @@ routing_result pong(timetable const& tt,
     return false;
   };
   while ((is_better(start_time, end_time) ||
-          get_result_count() < q.min_connection_count_) &&
+          get_result_count(true) + get_result_count(false) <
+              2 * q.min_connection_count_) &&
          tt.external_interval().contains(start_time) && !is_timeout_reached()) {
     // ----
     // PING
@@ -405,13 +398,14 @@ routing_result pong(timetable const& tt,
 
     starts.clear();
     get_starts(SearchDir, tt, rtt, start_time, q.start_, q.td_start_,
-               q.max_start_offset_, q.start_match_mode_, q.use_start_footpaths_,
-               starts, false, q.prf_idx_, q.transfer_time_settings_);
+               q.via_stops_, q.max_start_offset_, q.start_match_mode_,
+               q.use_start_footpaths_, starts, false, q.prf_idx_,
+               q.transfer_time_settings_);
     ping.reset_arrivals();
     ping.next_start_time();
     for (auto const& s : starts) {
       trace_pong("--- PING START: {} at time_at_start={} time_at_stop={}",
-                 location{tt, s.stop_}, s.time_at_start_, s.time_at_stop_);
+                 loc{tt, s.stop_}, s.time_at_start_, s.time_at_stop_);
       ping.add_start(s.stop_, s.time_at_stop_);
     }
     auto const worst_time_at_dest =
@@ -447,13 +441,14 @@ routing_result pong(timetable const& tt,
 
       starts.clear();
       get_starts(flip(SearchDir), tt, rtt, ping_j.dest_time_, q.start_,
-                 q.td_start_, q.max_start_offset_, q.start_match_mode_,
+                 q.td_start_, q.via_stops_, q.max_start_offset_,
+                 q.start_match_mode_,
                  q.start_match_mode_ != location_match_mode::kIntermodal,
                  starts, false, q.prf_idx_, q.transfer_time_settings_);
       pong.next_start_time();
       for (auto const& s : starts) {
         trace_pong("---- PONG START: {} at time_at_start={} time_at_stop={}",
-                   location{tt, s.stop_}, s.time_at_start_, s.time_at_stop_);
+                   loc{tt, s.stop_}, s.time_at_start_, s.time_at_stop_);
         pong.add_start(s.stop_, s.time_at_stop_);
       }
       pong.execute(ping_j.dest_time_, ping_j.transfers_,
@@ -578,7 +573,7 @@ routing_result pong(timetable const& tt,
       auto const back_r = rt::frun{tt, rtt, back.r_};
       auto const to = back_r[back.stop_range_.from_];
 
-      auto const earlier = get_earliest_alternatve(
+      auto const earlier = get_earliest_alternative(
           tt, rtt, q, from.get_location_idx(), to.get_location_idx(),
           from.time(event_type::kArr), to.time(event_type::kDep),
           r_state.prev_station_mark_, r_state.station_mark_);

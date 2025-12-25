@@ -104,6 +104,9 @@ target_link_libraries(
   sol2
   libluajit
   proj
+  PRIVATE
+  boost-iostreams
+  zlibstatic
 )
 target_compile_features(nigiri PUBLIC cxx_std_23)
 target_compile_options(nigiri PRIVATE ${nigiri-compile-options})
@@ -140,3 +143,11 @@ target_include_directories(nigiri-test PRIVATE include)
 target_link_libraries(nigiri-test nigiri gmock ianatzdb-res nigiri-generated)
 target_compile_features(nigiri-test PUBLIC cxx_std_23)
 target_compile_options(nigiri-test PRIVATE ${nigiri-compile-options})
+
+
+# MacOS fix for LuaJIT
+if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+  target_link_options(nigiri-import PRIVATE -Wl,-no_deduplicate)
+  target_link_options(nigiri-test PRIVATE -Wl,-no_deduplicate)
+  target_link_options(nigiri-benchmark PRIVATE -Wl,-no_deduplicate)
+endif()
