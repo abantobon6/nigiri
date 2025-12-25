@@ -639,13 +639,8 @@ void calculate_delay_intelligent(timetable const& tt,
 
   key key{trip_idx, src};
 
-  auto const bla1 = r.t_.t_idx_;
-  auto const bla2 = tt.transport_route_[bla1];
-  auto const bla3 = tt.route_location_seq_[bla2];
-
-
   auto const location_seq =
-          std::span{bla3};
+          std::span{tt.route_location_seq_[tt.transport_route_[r.t_.t_idx_]]};
 
   auto const location_idx_seq = to_vec(location_seq, [&](auto const& stp) {
     return stop{stp}.location_idx();
