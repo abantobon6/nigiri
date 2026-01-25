@@ -74,6 +74,21 @@ std::pair<segment_idx_t, double> hist_trip_times_storage::get_segment_progress(t
             / geo::approx_squared_distance(tt.locations_.coordinates_[*segment_from], tt.locations_.coordinates_[*(segment_from-1)], adld)};
 }
 
+duration_t hist_trip_times_storage::get_delay(timetable const& tt, transport t, trip_seg_data* tsg ) {
+  // scheduled time to drive through entire segment
+  auto const req_segment_time = tt.event_time(t, static_cast<stop_idx_t>(tsg->seg_idx.v_), event_type::kDep)
+                                         - tt.event_time(t, static_cast<stop_idx_t>(tsg->seg_idx.v_ + 1), event_type::kArr);
+
+  // scheduled time to get to current progress
+  auto const req_progress_time = req_segment_time * tsg->progress;
+
+  // scheduled timestamp to be at current progress
+  auto const req_progress_timestamp = tt.event_time(t, static_cast<stop_idx_t>(tsg->seg_idx.v_), event_type::kDep) + req_progress_time;
+
+  // difference between scheduled timestamp and actual timestamp is delay
+  return std::chrono::duration_cast<duration_t>(tsg->timestamp - req_progress_timestamp);
+}
+
 void hist_trip_times_storage::print(std::ostream& out) const {
   out << "\ncs_key_coord_seq_:\n";
   for (const auto& [key, coord_seq_idx] : cs_key_coord_seq_) {

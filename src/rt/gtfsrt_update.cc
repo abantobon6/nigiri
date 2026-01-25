@@ -1,5 +1,7 @@
 #include "nigiri/rt/gtfsrt_update.h"
 
+#include "boost/chrono/duration.hpp"
+
 #include <string_view>
 #include <vector>
 
@@ -24,6 +26,7 @@
 #include "nigiri/types.h"
 
 #include "utl/concat.h"
+#include "utl/pipes/avg.h"
 
 namespace gtfsrt = transit_realtime;
 namespace protob = google::protobuf;
@@ -615,12 +618,11 @@ void calculate_delay_intelligent(timetable const& tt,
                              delay_prediction_storage* delay_prediction_store,
                              hist_trip_times_storage* hist_trip_time_store) {
 
-  // TODO: create delay calculation
-
   if (delay_prediction_store != nullptr) {
     return;
   }
 
+  // insertion of new data
 
   auto const& vp = entity.vehicle();
   auto const& td = vp.trip();
@@ -654,7 +656,7 @@ void calculate_delay_intelligent(timetable const& tt,
                                  std::chrono::seconds{vp.timestamp()})}
                               : std::chrono::time_point_cast<i32_minutes>(std::chrono::system_clock::now());
 
-  const trip_seg_data tsg{current_segment, current_progress, vp_ts};
+  const trip_seg_data tsd{current_segment, current_progress, vp_ts};
 
   auto const ut_start_time = parse_time(td.start_date() + "T" + td.start_time(), "%Y%m%dT%T");
 
@@ -663,17 +665,55 @@ void calculate_delay_intelligent(timetable const& tt,
 
     if (hist_trip_time_store->ttd_idx_trip_time_data_[ttd_idx].start_timestamp
           == ut_start_time) {
-      hist_trip_time_store->ttd_idx_trip_time_data_[ttd_idx].seg_data_.emplace_back(tsg);
+      hist_trip_time_store->ttd_idx_trip_time_data_[ttd_idx].seg_data_.emplace_back(tsd);
       found = true;
       break;
           }
   }
 
   if (!found) {
-    const trip_time_data new_ttd{ut_start_time, {tsg}};
+    const trip_time_data new_ttd{ut_start_time, {tsd}};
     hist_trip_time_store->coord_seq_idx_ttd_[coord_seq_idx].push_back(trip_time_data_idx_t{hist_trip_time_store->ttd_idx_trip_time_data_.size()});
     hist_trip_time_store->ttd_idx_trip_time_data_.emplace_back(new_ttd);
   }
+
+  // calculation of delay prediction
+  auto const kalman = delay_prediction_store->get_or_create_kalman(key, ut_start_time, hist_trip_time_store);
+
+  // calculation of delay of predecessor at same place
+  trip_seg_data* pred_tsd_candidate = nullptr;
+  for (auto tsd_to_check : kalman.predecessor->seg_data_) {
+    if (tsd_to_check.seg_idx == current_segment
+            && tsd_to_check.progress < current_progress
+            && (pred_tsd_candidate == nullptr || tsd_to_check.progress > pred_tsd_candidate->progress)) {
+      pred_tsd_candidate = &tsd_to_check;
+    }
+  }
+
+  auto const predecessor_delay = pred_tsd_candidate != nullptr ? hist_trip_time_store->get_delay(tt, r.t_, pred_tsd_candidate) : duration_t{};
+
+  // calculation of average delay of historic trips at same place
+  vector<duration_t> hist_delays;
+  for (auto hist_trip : kalman.hist_trips_) {
+    trip_seg_data* pred_tsd_candidate_hist = nullptr;
+    for (auto tsd_to_check : hist_trip->seg_data_) {
+      if (tsd_to_check.seg_idx == current_segment
+            && tsd_to_check.progress < current_progress
+            && (pred_tsd_candidate_hist == nullptr || tsd_to_check.progress > pred_tsd_candidate_hist->progress)) {
+        pred_tsd_candidate_hist = &tsd_to_check;
+            }
+    }
+    if (pred_tsd_candidate_hist != nullptr) {
+      hist_delays.emplace_back(hist_trip_time_store->get_delay(tt, r.t_, pred_tsd_candidate_hist));
+    }
+  }
+
+  auto const avg_hist_trips_delay = delay_prediction_store->get_avg_duration(hist_delays);
+
+  // Kalman calculation
+
+
+
 }
 
 statistics gtfsrt_update_msg(timetable const& tt,

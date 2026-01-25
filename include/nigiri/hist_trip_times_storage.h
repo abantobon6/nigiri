@@ -20,6 +20,12 @@ struct trip_seg_data {
   segment_idx_t seg_idx;
   double progress;
   unixtime_t timestamp;
+
+  bool operator== (const trip_seg_data& tsd) const {
+    return seg_idx == tsd.seg_idx
+            && progress == tsd.progress
+            && timestamp == tsd.timestamp;
+  }
 };
 
 struct trip_time_data {
@@ -41,7 +47,7 @@ struct hist_trip_times_storage {
 
   std::pair<segment_idx_t, double> get_segment_progress(timetable const&, geo::latlng, coord_seq_idx_t);
 
-  void print();
+  duration_t get_delay(timetable const&, transport, trip_seg_data*);
 
   void print(std::ostream& out) const;
 
