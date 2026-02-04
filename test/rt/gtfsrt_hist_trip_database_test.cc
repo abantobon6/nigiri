@@ -524,7 +524,7 @@ Segment: 16 Progress: 0.56827 Timestamp: 2023-08-10 09:30
 }  // namespace
 
 TEST(rt, gtfsrt_hist_trip_database_test) {
-  std::cout << "Test rt::gtsrt_hist_trip_database_test" << std::endl;
+  std::cout << "Test rt::gtfsrt_hist_trip_database_test" << std::endl;
 
   // Load static timetable.
   timetable tt;

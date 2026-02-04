@@ -74,19 +74,12 @@ std::pair<segment_idx_t, double> hist_trip_times_storage::get_segment_progress(t
             / geo::approx_squared_distance(tt.locations_.coordinates_[*segment_from], tt.locations_.coordinates_[*(segment_from-1)], adld)};
 }
 
-duration_t hist_trip_times_storage::get_delay(timetable const& tt, transport t, trip_seg_data* tsg ) {
-  // scheduled time to drive through entire segment
-  auto const req_segment_time = tt.event_time(t, static_cast<stop_idx_t>(tsg->seg_idx.v_), event_type::kDep)
-                                         - tt.event_time(t, static_cast<stop_idx_t>(tsg->seg_idx.v_ + 1), event_type::kArr);
+duration_t hist_trip_times_storage::get_remaining_time_till_next_stop(trip_seg_data const* tsg,
+                                              trip_time_data const* ttd) {
+  auto last_tsd_before_stop = std::find_if(ttd->seg_data_.rbegin(), ttd->seg_data_.rend(),
+    [tsg](auto const check_if_last_tsd){return tsg->seg_idx == check_if_last_tsd.seg_idx;});
 
-  // scheduled time to get to current progress
-  auto const req_progress_time = req_segment_time * tsg->progress;
-
-  // scheduled timestamp to be at current progress
-  auto const req_progress_timestamp = tt.event_time(t, static_cast<stop_idx_t>(tsg->seg_idx.v_), event_type::kDep) + req_progress_time;
-
-  // difference between scheduled timestamp and actual timestamp is delay
-  return std::chrono::duration_cast<duration_t>(tsg->timestamp - req_progress_timestamp);
+  return last_tsd_before_stop->timestamp - tsg->timestamp;
 }
 
 void hist_trip_times_storage::print(std::ostream& out) const {
