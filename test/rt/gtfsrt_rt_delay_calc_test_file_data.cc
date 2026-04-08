@@ -51,6 +51,12 @@ date::sys_days extract_date(std::string const& s) {
 TEST(rt, gtfsrt_rt_delay_calc_file_data) {
   nigiri::s_verbosity = nigiri::log_lvl::error;
 
+  std::ofstream raw_data_output{"raw_data_output.csv"};
+  if (raw_data_output) {
+    raw_data_output << "start_date,trip_id,measurement_number,measurement_time,stop,event,actual_delayed_time,predicted_delayed_time,predicted_deviation";
+  }
+  raw_data_output.close();
+
   auto const base_dir = std::filesystem::path{"test/test_data/gtfs_rt"};
 
   std::vector<std::filesystem::path> tu_pb_dirs;
@@ -305,12 +311,17 @@ TEST(rt, gtfsrt_rt_delay_calc_file_data) {
 
     auto calc_stats = [&](auto const& preds,
                           std::map<int, error_stat>& out_stats) {
+
+      raw_data_output.open("raw_data_output.csv");
+
       for (auto const& [trip_id, snaps] : preds) {
         auto it = actual_delays.find(trip_id);
         if (it == actual_delays.end()) {
           continue;
         }
         auto const& act = it->second;
+        uint32_t snap_counter = 0;
+        bool event = 1;
         for (auto const& snap : snaps) {
           for (size_t stop_idx = 0;
                stop_idx < snap.stop_predictions.size() && stop_idx < act.size();
@@ -335,15 +346,29 @@ TEST(rt, gtfsrt_rt_delay_calc_file_data) {
             }
 
             int const bin = static_cast<int>(horizon_min / 5);
-            auto const err_min = std::abs(
+            auto const err_min =
                 std::chrono::duration_cast<std::chrono::minutes>(p_ts - a_ts)
-                    .count());
+                    .count();
 
-            out_stats[bin].total_abs_error_min += err_min;
+            raw_data_output << "\n" << trip_id.substr(0, trip_id.size() - 7) << ","
+                            << trip_id.substr(trip_id.size() - 6, 6) << ","
+                            << snap_counter << ","
+                            << m_ts << ","
+                            << stop_idx << ","
+                            << event << "," << a_ts
+                            << "," << p_ts << ","
+                            << err_min;
+
+            event = !event;
+            snap_counter++;
+            auto const err_min_abs = std::abs(err_min);
+
+            out_stats[bin].total_abs_error_min += err_min_abs;
             out_stats[bin].count++;
           }
         }
       }
+      raw_data_output.close();
     };
 
     std::string const intelligent_file_name =

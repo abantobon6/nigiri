@@ -1749,4 +1749,7 @@ TEST(rt, gtfsrt_rt_delay_calc) {
                 << " hops: " << dps.n_jumped_over_stps_sgmts[i] << "\n";
     }
   }
+
+  vector
+
 }
